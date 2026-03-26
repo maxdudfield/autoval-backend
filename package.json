@@ -1,0 +1,12 @@
+{
+  "name": "autoval-backend",
+  "version": "1.0.0",
+  "description": "AutoVal API proxy — keeps Anthropic key server-side",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "vercel dev",
+    "test": "node test.js"
+  }
+}
