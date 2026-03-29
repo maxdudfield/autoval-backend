@@ -1,4 +1,4 @@
-const { checkRateLimit, callAnthropic, getComparableListings, PHASE2_SYSTEM_PROMPT, buildPhase2UserPrompt } = require('./_lib');
+const { checkRateLimit, callAnthropic, getComparableListings, saveScan, PHASE2_SYSTEM_PROMPT, buildPhase2UserPrompt } = require('./_lib');
 
 module.exports.config = {
   api: { bodyParser: { sizeLimit: '1mb' } },
@@ -51,6 +51,10 @@ module.exports = async (req, res) => {
   try {
     const jsonText = await callAnthropic(anthropicBody);
     const parsed = JSON.parse(jsonText);
+
+    // Fire-and-forget — never let this block or fail the response
+    saveScan(vehicle, userInputs, parsed, comparableMeta);
+
     return res.status(200).json({
       ...parsed,
       dataSource:            source,

@@ -270,10 +270,64 @@ ${comparablesSection}
 Return the valuation JSON as specified in the system prompt.`;
 }
 
+// ---------------------------------------------------------------------------
+// Scan analytics persistence
+// ---------------------------------------------------------------------------
+
+/**
+ * Fire-and-forget: saves an anonymous scan record to the scans table.
+ * Never throws — a save failure must not affect the user's response.
+ */
+async function saveScan(vehicle, userInputs, pricingResult, comparableMeta) {
+  try {
+    const supabase = getSupabase();
+    if (!supabase) return;
+
+    const { error } = await supabase.from('scans').insert({
+      make:                 vehicle.make,
+      model:                vehicle.model,
+      year:                 vehicle.year,
+      trim:                 vehicle.trim,
+      body_type:            vehicle.bodyType,
+      colour:               vehicle.colour,
+      drive_type:           vehicle.driveType,
+      cv_confidence:        vehicle.cvConfidence,
+      paint_condition:      vehicle.conditionSignals?.paint,
+      panel_condition:      vehicle.conditionSignals?.panelWork,
+      overall_condition:    vehicle.conditionSignals?.overall,
+      odometer:             userInputs.mileageUnknown ? null : userInputs.mileage,
+      mileage_unknown:      userInputs.mileageUnknown ?? false,
+      user_condition:       userInputs.condition,
+      state:                userInputs.state,
+      postcode:             userInputs.postcode,
+      valuation_low:        pricingResult.finalValuation?.low,
+      valuation_mid:        pricingResult.finalValuation?.mid,
+      valuation_high:       pricingResult.finalValuation?.high,
+      confidence_score:     pricingResult.confidenceScore,
+      market_insight:       pricingResult.marketInsight,
+      comparables_found:    pricingResult.comparables?.totalFound,
+      regional_demand:      pricingResult.comparables?.regionalDemandIndex,
+      market_velocity:      pricingResult.comparables?.marketVelocity,
+      used_real_listings:   comparableMeta?.source === 'real_listings',
+      real_listings_count:  comparableMeta?.totalFound ?? 0,
+      app_version:          '1.0',
+    });
+
+    if (error) {
+      console.error('[saveScan] insert error:', error.message);
+    } else {
+      console.log(`[saveScan] recorded: ${vehicle.year} ${vehicle.make} ${vehicle.model} $${pricingResult.finalValuation?.mid}`);
+    }
+  } catch (err) {
+    console.error('[saveScan] unexpected error:', err.message);
+  }
+}
+
 module.exports = {
   checkRateLimit,
   callAnthropic,
   getComparableListings,
+  saveScan,
   PHASE1_SYSTEM_PROMPT,
   buildPhase1UserPrompt,
   PHASE2_SYSTEM_PROMPT,
