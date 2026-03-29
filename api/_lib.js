@@ -2,6 +2,79 @@
 // Leading underscore prevents Vercel treating this as a route.
 
 // ---------------------------------------------------------------------------
+// Supabase — comparable listings lookup
+// ---------------------------------------------------------------------------
+
+let _supabase;
+function getSupabase() {
+  if (!_supabase) {
+    const { createClient } = require('@supabase/supabase-js');
+    const url = process.env.SUPABASE_URL;
+    const key = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_KEY;
+    if (!url || !key) return null; // not configured — fall back gracefully
+    _supabase = createClient(url, key);
+  }
+  return _supabase;
+}
+
+/**
+ * Returns comparable AutoTrader AU listings for the vehicle.
+ * Progressive fallback: state+tight mileage → national+tight → state+wide → national+wide → state only.
+ * Returns { listings, isStateSpecific, isMileageFiltered, totalFound, source }
+ */
+async function getComparableListings(vehicle, userInputs) {
+  const supabase = getSupabase();
+  if (!supabase) return { listings: [], isStateSpecific: false, isMileageFiltered: false, totalFound: 0, source: 'no_data' };
+
+  const { make, model, yearLow, yearHigh } = vehicle;
+  const { state, mileage, mileageUnknown } = userInputs;
+
+  const yearFrom = (yearLow  ?? 2000) - 2;
+  const yearTo   = (yearHigh ?? 2030) + 2;
+  const tightLow  = mileageUnknown || mileage == null ? null : mileage - 30_000;
+  const tightHigh = mileageUnknown || mileage == null ? null : mileage + 30_000;
+  const wideLow   = mileageUnknown || mileage == null ? null : mileage - 50_000;
+  const wideHigh  = mileageUnknown || mileage == null ? null : mileage + 50_000;
+
+  const baseQuery = () => supabase
+    .from('listings')
+    .select('year, make, model, trim, odometer, price, state, colour, dealer_or_private, days_listed, scraped_at')
+    .ilike('make', make)
+    .ilike('model', model)
+    .gte('year', yearFrom)
+    .lte('year', yearTo)
+    .eq('is_active', true)
+    .order('scraped_at', { ascending: false })
+    .limit(20);
+
+  const attempts = [
+    { stateFilter: state, oLow: tightLow,  oHigh: tightHigh, isState: true,  isMileage: true  },
+    { stateFilter: null,  oLow: tightLow,  oHigh: tightHigh, isState: false, isMileage: true  },
+    { stateFilter: state, oLow: wideLow,   oHigh: wideHigh,  isState: true,  isMileage: true  },
+    { stateFilter: null,  oLow: wideLow,   oHigh: wideHigh,  isState: false, isMileage: true  },
+    { stateFilter: state, oLow: null,      oHigh: null,      isState: true,  isMileage: false },
+  ];
+
+  for (const { stateFilter, oLow, oHigh, isState, isMileage } of attempts) {
+    let q = baseQuery();
+    if (stateFilter) q = q.eq('state', stateFilter);
+    if (oLow != null) q = q.gte('odometer', oLow);
+    if (oHigh != null) q = q.lte('odometer', oHigh);
+
+    const { data, error } = await q;
+    if (error) {
+      console.error('[comparables] Supabase error:', error.message);
+      return { listings: [], isStateSpecific: false, isMileageFiltered: false, totalFound: 0, source: 'no_data' };
+    }
+    if (data && data.length >= 5) {
+      return { listings: data, isStateSpecific: isState, isMileageFiltered: isMileage, totalFound: data.length, source: 'real_listings' };
+    }
+  }
+
+  return { listings: [], isStateSpecific: false, isMileageFiltered: false, totalFound: 0, source: 'no_data' };
+}
+
+// ---------------------------------------------------------------------------
 // Rate limiter — in-memory per serverless instance (good enough for basic abuse
 // prevention; for global limits use Upstash Redis).
 // ---------------------------------------------------------------------------
@@ -147,7 +220,7 @@ Rules:
 - Provide 3–6 adjustments — include condition, colour, regional demand, and any notable features.
 - If mileage is unknown, do NOT apply a mileage adjustment; instead note the missing odometer in confidenceFactors and use a reduced confidenceScore.`;
 
-function buildPhase2UserPrompt(vehicle, inputs) {
+function buildPhase2UserPrompt(vehicle, inputs, comparables = []) {
   const odometer = inputs.mileageUnknown
     ? 'Unknown — use fleet average for age and type. Do NOT apply a mileage adjustment.'
     : inputs.mileage != null
@@ -157,6 +230,19 @@ function buildPhase2UserPrompt(vehicle, inputs) {
   const features = vehicle.detectedFeatures?.length
     ? vehicle.detectedFeatures.join(', ')
     : 'None detected';
+
+  let comparablesSection;
+  if (comparables.length >= 1) {
+    const lines = comparables.map(c => {
+      const odo = c.odometer ? `${c.odometer.toLocaleString()}km` : 'odo unknown';
+      const seller = c.dealer_or_private ? ` (${c.dealer_or_private})` : '';
+      return `- ${c.year} ${c.make} ${c.model}${c.trim ? ' ' + c.trim : ''}, ${odo}, ${c.state ?? '?'}${seller} — $${c.price.toLocaleString()}`;
+    }).join('\n');
+
+    comparablesSection = `\nREAL COMPARABLE LISTINGS FROM AUTOTRADER.COM.AU:\n${lines}\n\nUse these real comparable listings as the PRIMARY basis for your valuation. Calculate the median price, remove outliers beyond 1.5× IQR, and apply the adjustments below from that baseline. Set comparables.totalFound and comparables.afterOutlierRemoval based on this data.`;
+  } else {
+    comparablesSection = '\nNote: No live AutoTrader AU listings found for this specification. Base your valuation on estimated market data and note "Based on estimated market data — no live listings found for this specification" in confidenceFactors. Use a reduced confidenceScore.';
+  }
 
   return `Please provide a market valuation for the following Australian vehicle:
 
@@ -179,6 +265,7 @@ Overall: ${vehicle.conditionSignals?.overall}
 
 Detected features: ${features}
 CV identification confidence: ${vehicle.cvConfidence}%
+${comparablesSection}
 
 Return the valuation JSON as specified in the system prompt.`;
 }
@@ -186,6 +273,7 @@ Return the valuation JSON as specified in the system prompt.`;
 module.exports = {
   checkRateLimit,
   callAnthropic,
+  getComparableListings,
   PHASE1_SYSTEM_PROMPT,
   buildPhase1UserPrompt,
   PHASE2_SYSTEM_PROMPT,
