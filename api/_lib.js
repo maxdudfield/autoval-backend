@@ -244,6 +244,28 @@ function buildPhase2UserPrompt(vehicle, inputs, comparables = []) {
     comparablesSection = '\nNote: No live AutoTrader AU listings found for this specification. Base your valuation on estimated market data and note "Based on estimated market data — no live listings found for this specification" in confidenceFactors. Use a reduced confidenceScore.';
   }
 
+  const isDeal = inputs.scanMode === 'deal' && inputs.askingPrice > 0;
+
+  const dealSection = isDeal ? `
+
+DEAL CHECK MODE — ASKING PRICE: $${inputs.askingPrice.toLocaleString()} AUD
+The buyer is considering purchasing this vehicle at the asking price above.
+After completing the standard valuation JSON, append a "dealAnalysis" object with this exact schema:
+{
+  "dealAnalysis": {
+    "verdict": "overpriced" | "fair" | "good_deal" | "excellent_deal",
+    "summary": "string — one sentence summarising the deal quality",
+    "negotiationTip": "string — one actionable sentence of negotiation advice",
+    "suggestedOffer": { "low": integer AUD, "high": integer AUD }
+  }
+}
+Verdict rules (based on asking vs your finalValuation.mid):
+- asking > mid by more than 10% → "overpriced"
+- asking within +10% / -5% of mid → "fair"
+- asking below mid by 5–15% → "good_deal"
+- asking below mid by more than 15% → "excellent_deal"
+suggestedOffer.low = mid * 0.90, suggestedOffer.high = mid * 0.97 (always use market mid, not asking price).` : '';
+
   return `Please provide a market valuation for the following Australian vehicle:
 
 Vehicle: ${vehicle.year} ${vehicle.make} ${vehicle.model} ${vehicle.trim ?? ''}
@@ -265,7 +287,7 @@ Overall: ${vehicle.conditionSignals?.overall}
 
 Detected features: ${features}
 CV identification confidence: ${vehicle.cvConfidence}%
-${comparablesSection}
+${comparablesSection}${dealSection}
 
 Return the valuation JSON as specified in the system prompt.`;
 }

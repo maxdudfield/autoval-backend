@@ -36,11 +36,12 @@ module.exports = async (req, res) => {
   const { listings, isStateSpecific, isMileageFiltered, totalFound, source } = comparableMeta;
   const scrapedAt = listings.length > 0 ? (listings[0].scraped_at ?? null) : null;
 
-  console.log(`[value] comparables: source=${source} found=${totalFound} stateSpecific=${isStateSpecific} mileageFiltered=${isMileageFiltered} vehicle="${vehicle.make} ${vehicle.model} ${vehicle.year ?? ''}" state=${userInputs.state ?? '?'}`);
+  const isDeal = userInputs.scanMode === 'deal' && userInputs.askingPrice > 0;
+  console.log(`[value] mode=${userInputs.scanMode ?? 'valuation'} askingPrice=${userInputs.askingPrice ?? 'n/a'} comparables: source=${source} found=${totalFound} stateSpecific=${isStateSpecific} vehicle="${vehicle.make} ${vehicle.model} ${vehicle.year ?? ''}" state=${userInputs.state ?? '?'}`);
 
   const anthropicBody = {
     model: 'claude-sonnet-4-20250514',
-    max_tokens: 1500,
+    max_tokens: isDeal ? 1800 : 1500,
     system: PHASE2_SYSTEM_PROMPT,
     messages: [{
       role: 'user',
