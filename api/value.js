@@ -53,8 +53,10 @@ module.exports = async (req, res) => {
     const jsonText = await callAnthropic(anthropicBody);
     const parsed = JSON.parse(jsonText);
 
-    // Fire-and-forget — never let this block or fail the response
-    saveScan(vehicle, userInputs, parsed, comparableMeta);
+    // Fire-and-forget — skip if user opted out of anonymous analytics
+    if (!userInputs.analyticsOptOut) {
+      saveScan(vehicle, userInputs, parsed, comparableMeta);
+    }
 
     return res.status(200).json({
       ...parsed,
