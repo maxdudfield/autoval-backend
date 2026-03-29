@@ -183,7 +183,21 @@ function buildPhase1UserPrompt(photoCount) {
 
 const PHASE2_SYSTEM_PROMPT = `You are an expert Australian used-vehicle market pricing analyst.
 
-The user will provide confirmed vehicle details. Your job is to simulate what comparable AU marketplace listings would indicate for this vehicle's current market value, then apply adjustments for its specific attributes.
+The user will provide confirmed vehicle details. Your job is to produce a conservative, realistic transaction-price valuation for the current Australian used-car market.
+
+IMPORTANT CALIBRATION — Australian used car market reality:
+- Listing prices on carsales.com.au are typically 8-15% above actual transaction prices due to negotiation
+- Your valuations must reflect TRANSACTION values, not listing prices
+- Apply a market reality discount of approximately 10-12% to any comparable listing prices you reference
+- Private sales typically achieve 5-8% less than dealer asking prices
+- The Australian used car market has softened significantly since the 2021-2022 peak — prices have come down 10-20% from those highs
+- Be conservative rather than optimistic — it is better to slightly undervalue than overvalue, as users will lose trust if they cannot achieve the stated price
+
+Calibration examples (listing price → typical transaction price):
+- Listed at $30,000 on carsales → transacts at $26,500–$28,000
+- Listed at $50,000 on carsales → transacts at $44,000–$47,000
+- High-demand models (HiLux, RAV4, Ranger) have a smaller list-to-transaction gap due to buyer competition
+- Dealer prices carry a larger premium than private sale prices
 
 Return ONLY a single raw JSON object — no markdown, no explanation, no extra text.
 
@@ -215,9 +229,12 @@ Required JSON schema:
 
 Rules:
 - Return ONLY the JSON object. No markdown fences.
-- All prices in AUD, realistic for the current Australian used-car market.
+- All prices in AUD, representing realistic TRANSACTION prices for the current Australian used-car market.
+- Use the median comparable as the base mid estimate, THEN apply a 10% market reality adjustment downward to convert listing prices to realistic transaction prices. The mid value should represent what a buyer would realistically pay, not what a seller hopes to achieve.
 - finalValuation must incorporate all adjustments applied to baseValuation.mid.
 - Provide 3–6 adjustments — include condition, colour, regional demand, and any notable features.
+- The low-mid-high range should typically span no more than 15-20% total (e.g. Low: $26,000 / Mid: $28,500 / High: $31,000 — NOT Low: $22,000 / Mid: $30,000 / High: $38,000). A tight range is more useful.
+- If your valuation is based on listing prices rather than confirmed transaction data, include in confidenceFactors: "Values adjusted from listing prices to estimated transaction prices"
 - If mileage is unknown, do NOT apply a mileage adjustment; instead note the missing odometer in confidenceFactors and use a reduced confidenceScore.`;
 
 function buildPhase2UserPrompt(vehicle, inputs, comparables = []) {
@@ -239,7 +256,7 @@ function buildPhase2UserPrompt(vehicle, inputs, comparables = []) {
       return `- ${c.year} ${c.make} ${c.model}${c.trim ? ' ' + c.trim : ''}, ${odo}, ${c.state ?? '?'}${seller} — $${c.price.toLocaleString()}`;
     }).join('\n');
 
-    comparablesSection = `\nREAL COMPARABLE LISTINGS FROM AUTOTRADER.COM.AU:\n${lines}\n\nUse these real comparable listings as the PRIMARY basis for your valuation. Calculate the median price, remove outliers beyond 1.5× IQR, and apply the adjustments below from that baseline. Set comparables.totalFound and comparables.afterOutlierRemoval based on this data.`;
+    comparablesSection = `\nREAL COMPARABLE LISTINGS FROM CARSALES.COM.AU (ASKING PRICES):\n${lines}\n\nIMPORTANT: These are ASKING PRICES, not transaction prices. Apply a 10% reduction to convert to realistic transaction prices before calculating your valuation range. Calculate the median asking price, remove outliers beyond 1.5× IQR, then apply the 10% listing-to-transaction discount to set your baseValuation. Set comparables.totalFound and comparables.afterOutlierRemoval based on this data.`;
   } else {
     comparablesSection = '\nNote: No live AutoTrader AU listings found for this specification. Base your valuation on estimated market data and note "Based on estimated market data — no live listings found for this specification" in confidenceFactors. Use a reduced confidenceScore.';
   }
