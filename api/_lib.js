@@ -17,17 +17,55 @@ function getSupabase() {
   return _supabase;
 }
 
+// ---------------------------------------------------------------------------
+// Make / model normalisation
+// ---------------------------------------------------------------------------
+
 /**
- * Returns comparable AutoTrader AU listings for the vehicle.
+ * Case-insensitive make pattern. ILIKE handles case, so just trim.
+ * "Mercedes-Benz" stays "Mercedes-Benz" so ilike matches DB value exactly.
+ */
+function normaliseMake(make) {
+  return make.trim();
+}
+
+/**
+ * Builds an ILIKE pattern that matches common AU market model name variations:
+ *   "RAV4"    → "rav%4"   matches "RAV4", "RAV 4", "RAV-4"
+ *   "Mazda3"  → "mazda%3" matches "Mazda3", "Mazda 3"
+ *   "C-Class" → "c%class" matches "C-Class", "C Class", "CClass"
+ *   "HiLux"   → "hilux"   (no letter↔digit boundary — ILIKE handles case)
+ * Strategy: strip spaces/hyphens, lowercase, then insert % at letter↔digit
+ * boundaries so a single wildcard bridges both "word4" and "word 4" forms.
+ */
+function buildModelPattern(model) {
+  const stripped = model.trim().toLowerCase().replace(/[\s\-]+/g, '');
+  return stripped
+    .replace(/([a-z])(\d)/g, '$1%$2')   // letter→digit: "rav4" → "rav%4"
+    .replace(/(\d)([a-z])/g, '$1%$2');  // digit→letter: "3series" → "3%series"
+}
+
+/**
+ * Returns comparable carsales.com.au listings for the vehicle.
  * Progressive fallback: state+tight mileage → national+tight → state+wide → national+wide → state only.
+ * Minimum threshold: 5 listings before falling back to Claude estimate.
  * Returns { listings, isStateSpecific, isMileageFiltered, totalFound, source }
  */
 async function getComparableListings(vehicle, userInputs) {
   const supabase = getSupabase();
-  if (!supabase) return { listings: [], isStateSpecific: false, isMileageFiltered: false, totalFound: 0, source: 'no_data' };
+  if (!supabase) {
+    console.log('[comparables] Supabase not configured — skipping real listings query');
+    return { listings: [], isStateSpecific: false, isMileageFiltered: false, totalFound: 0, source: 'no_data' };
+  }
 
   const { make, model, yearLow, yearHigh } = vehicle;
   const { state, mileage, mileageUnknown } = userInputs;
+
+  const makePattern  = normaliseMake(make);
+  const modelPattern = buildModelPattern(model);
+  const MIN_LISTINGS = 5;
+
+  console.log(`[comparables] Query: make="${makePattern}" model="${model}" → pattern "${modelPattern}" year=${yearLow ?? '?'}-${yearHigh ?? '?'} state=${state ?? 'any'} mileage=${mileageUnknown ? 'unknown' : (mileage != null ? mileage.toLocaleString() + 'km' : 'null')} threshold=${MIN_LISTINGS}`);
 
   const yearFrom = (yearLow  ?? 2000) - 2;
   const yearTo   = (yearHigh ?? 2030) + 2;
@@ -39,8 +77,8 @@ async function getComparableListings(vehicle, userInputs) {
   const baseQuery = () => supabase
     .from('listings')
     .select('year, make, model, trim, odometer, price, state, colour, dealer_or_private, days_listed, scraped_at')
-    .ilike('make', make)
-    .ilike('model', model)
+    .ilike('make', makePattern)
+    .ilike('model', modelPattern)
     .gte('year', yearFrom)
     .lte('year', yearTo)
     .eq('is_active', true)
@@ -48,29 +86,35 @@ async function getComparableListings(vehicle, userInputs) {
     .limit(20);
 
   const attempts = [
-    { stateFilter: state, oLow: tightLow,  oHigh: tightHigh, isState: true,  isMileage: true  },
-    { stateFilter: null,  oLow: tightLow,  oHigh: tightHigh, isState: false, isMileage: true  },
-    { stateFilter: state, oLow: wideLow,   oHigh: wideHigh,  isState: true,  isMileage: true  },
-    { stateFilter: null,  oLow: wideLow,   oHigh: wideHigh,  isState: false, isMileage: true  },
-    { stateFilter: state, oLow: null,      oHigh: null,      isState: true,  isMileage: false },
+    { stateFilter: state, oLow: tightLow,  oHigh: tightHigh, isState: true,  isMileage: true,  label: 'state+tight-mileage' },
+    { stateFilter: null,  oLow: tightLow,  oHigh: tightHigh, isState: false, isMileage: true,  label: 'national+tight-mileage' },
+    { stateFilter: state, oLow: wideLow,   oHigh: wideHigh,  isState: true,  isMileage: true,  label: 'state+wide-mileage' },
+    { stateFilter: null,  oLow: wideLow,   oHigh: wideHigh,  isState: false, isMileage: true,  label: 'national+wide-mileage' },
+    { stateFilter: state, oLow: null,      oHigh: null,      isState: true,  isMileage: false, label: 'state+any-mileage' },
   ];
 
-  for (const { stateFilter, oLow, oHigh, isState, isMileage } of attempts) {
+  for (const { stateFilter, oLow, oHigh, isState, isMileage, label } of attempts) {
     let q = baseQuery();
     if (stateFilter) q = q.eq('state', stateFilter);
-    if (oLow != null) q = q.gte('odometer', oLow);
+    if (oLow  != null) q = q.gte('odometer', oLow);
     if (oHigh != null) q = q.lte('odometer', oHigh);
 
     const { data, error } = await q;
     if (error) {
-      console.error('[comparables] Supabase error:', error.message);
+      console.error(`[comparables] Supabase error on attempt "${label}":`, error.message);
       return { listings: [], isStateSpecific: false, isMileageFiltered: false, totalFound: 0, source: 'no_data' };
     }
-    if (data && data.length >= 5) {
-      return { listings: data, isStateSpecific: isState, isMileageFiltered: isMileage, totalFound: data.length, source: 'real_listings' };
+
+    const count = data?.length ?? 0;
+    console.log(`[comparables] Attempt "${label}": ${count} results`);
+
+    if (count >= MIN_LISTINGS) {
+      console.log(`[comparables] ✓ Threshold met (${count} >= ${MIN_LISTINGS}) — using real listings`);
+      return { listings: data, isStateSpecific: isState, isMileageFiltered: isMileage, totalFound: count, source: 'real_listings' };
     }
   }
 
+  console.log(`[comparables] ✗ All ${attempts.length} attempts exhausted with <${MIN_LISTINGS} listings — falling back to Claude estimate`);
   return { listings: [], isStateSpecific: false, isMileageFiltered: false, totalFound: 0, source: 'no_data' };
 }
 
