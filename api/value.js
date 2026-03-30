@@ -1,27 +1,86 @@
-const { checkRateLimit, callAnthropic, getComparableListings, saveScan, PHASE2_SYSTEM_PROMPT, buildPhase2UserPrompt } = require('./_lib');
+const { checkAppSecret, checkRateLimit, callAnthropic, getComparableListings, saveScan, sanitiseError, PHASE2_SYSTEM_PROMPT, buildPhase2UserPrompt } = require('./_lib');
 
 module.exports.config = {
   api: { bodyParser: { sizeLimit: '1mb' } },
 };
+
+// ---------------------------------------------------------------------------
+// Validation constants
+// ---------------------------------------------------------------------------
+
+const AU_STATES = new Set(['NSW', 'VIC', 'QLD', 'SA', 'WA', 'TAS', 'NT', 'ACT']);
+const CURRENT_YEAR = new Date().getFullYear();
+
+function validateRequest(vehicle, userInputs) {
+  if (!vehicle || typeof vehicle !== 'object')
+    return 'vehicle object is required';
+  if (!vehicle.make || typeof vehicle.make !== 'string' || vehicle.make.trim().length === 0)
+    return 'vehicle.make must be a non-empty string';
+  if (!vehicle.model || typeof vehicle.model !== 'string' || vehicle.model.trim().length === 0)
+    return 'vehicle.model must be a non-empty string';
+
+  // Year validation — accept any of year / yearLow / yearHigh
+  const year = vehicle.year ?? vehicle.yearLow ?? vehicle.yearHigh;
+  if (year != null) {
+    const y = Number(year);
+    if (!Number.isInteger(y) || y < 1990 || y > CURRENT_YEAR + 1)
+      return `year must be between 1990 and ${CURRENT_YEAR + 1}`;
+  }
+
+  if (!userInputs || typeof userInputs !== 'object')
+    return 'userInputs object is required';
+  if (!AU_STATES.has(userInputs.state))
+    return `state must be one of: ${[...AU_STATES].join(', ')}`;
+  if (!/^\d{4}$/.test(String(userInputs.postcode ?? '')))
+    return 'postcode must be exactly 4 digits';
+
+  if (!userInputs.mileageUnknown && userInputs.mileage != null) {
+    const m = Number(userInputs.mileage);
+    if (!Number.isInteger(m) || m < 0 || m > 999_999)
+      return 'mileage must be between 0 and 999999';
+  }
+
+  if (userInputs.askingPrice != null) {
+    const p = Number(userInputs.askingPrice);
+    if (!Number.isInteger(p) || p < 100 || p > 10_000_000)
+      return 'askingPrice must be between 100 and 10000000';
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Handler
+// ---------------------------------------------------------------------------
 
 module.exports = async (req, res) => {
   // CORS preflight
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  // Rate limiting
   const ip = (req.headers['x-forwarded-for'] ?? '').split(',')[0].trim() || 'unknown';
-  if (!checkRateLimit(ip)) {
-    return res.status(429).json({ error: 'Too many requests — please wait a moment' });
+
+  // ── Auth ──────────────────────────────────────────────────────────────────
+  if (!checkAppSecret(req, ip)) {
+    return res.status(401).json({ error: 'Unauthorised' });
   }
 
-  // Validate body
-  const { vehicle, userInputs } = req.body ?? {};
-  if (!vehicle || typeof vehicle !== 'object') {
-    return res.status(400).json({ error: 'vehicle object is required' });
+  // ── Rate limiting ─────────────────────────────────────────────────────────
+  const rateCheck = checkRateLimit(ip);
+  if (!rateCheck.allowed) {
+    return res.status(429).json({
+      error: 'Rate limit exceeded',
+      retryAfter: rateCheck.retryAfter,
+      message: 'Please wait before scanning again',
+    });
   }
-  if (!userInputs || typeof userInputs !== 'object') {
-    return res.status(400).json({ error: 'userInputs object is required' });
+
+  // ── Validation ────────────────────────────────────────────────────────────
+  const { vehicle, userInputs } = req.body ?? {};
+  const validationError = validateRequest(vehicle, userInputs);
+  if (validationError) {
+    console.warn(`[SECURITY] Invalid request body from IP ${ip}: ${validationError}`);
+    return res.status(400).json({ error: validationError });
   }
 
   const vehicleLabel = `${vehicle.yearLow ?? vehicle.year ?? '?'} ${vehicle.make} ${vehicle.model}`;
@@ -90,6 +149,6 @@ module.exports = async (req, res) => {
     });
   } catch (err) {
     console.error(`[value] ✗ Error: ${err.message}`);
-    return res.status(err.status ?? 500).json({ error: err.message ?? 'Internal server error' });
+    return res.status(err.status ?? 500).json({ error: sanitiseError(err) });
   }
 };

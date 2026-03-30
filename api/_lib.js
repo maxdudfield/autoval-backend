@@ -119,23 +119,111 @@ async function getComparableListings(vehicle, userInputs) {
 }
 
 // ---------------------------------------------------------------------------
-// Rate limiter — in-memory per serverless instance (good enough for basic abuse
-// prevention; for global limits use Upstash Redis).
+// App-secret auth check
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true if the request carries the correct x-autoval-secret header.
+ * When APP_SECRET env var is not set (local dev without .env.local) the
+ * check is bypassed so development isn't blocked.
+ */
+function checkAppSecret(req, ip) {
+  const APP_SECRET = process.env.APP_SECRET;
+  if (!APP_SECRET) return true;                          // dev: not configured → allow
+  const incoming = req.headers['x-autoval-secret'];
+  if (incoming !== APP_SECRET) {
+    console.warn(`[SECURITY] Invalid or missing app secret from IP ${ip} — header ${incoming ? '[present but wrong]' : '[missing]'}`);
+    return false;
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Rate limiter — multi-window, in-memory per serverless instance.
+// For true global limits across cold-start instances use Upstash Redis.
 // ---------------------------------------------------------------------------
 
 const _rateLimitMap = new Map();
 
-function checkRateLimit(ip, maxPerMinute = 10) {
-  const now = Date.now();
-  const windowStart = now - 60_000;
-  const times = (_rateLimitMap.get(ip) ?? []).filter(t => t > windowStart);
-  if (times.length >= maxPerMinute) {
-    _rateLimitMap.set(ip, times);
-    return false;
+const RATE_LIMITS = {
+  minute: 3,   // max scans per minute (nobody scans 3 cars per minute legitimately)
+  hour:   20,  // max scans per hour
+  day:    50,  // max scans per day
+};
+
+/**
+ * Returns { allowed: true } or { allowed: false, retryAfter: seconds, window: string }.
+ */
+function checkRateLimit(ip) {
+  const now        = Date.now();
+  const ONE_MIN    = 60_000;
+  const ONE_HOUR   = 3_600_000;
+  const ONE_DAY    = 86_400_000;
+
+  // Keep only timestamps within the largest window
+  const times = (_rateLimitMap.get(ip) ?? []).filter(t => t > now - ONE_DAY);
+
+  const perMin  = times.filter(t => t > now - ONE_MIN).length;
+  const perHour = times.filter(t => t > now - ONE_HOUR).length;
+  const perDay  = times.length;
+
+  if (perMin >= RATE_LIMITS.minute) {
+    const oldest = times.filter(t => t > now - ONE_MIN)[0];
+    const retryAfter = Math.ceil((oldest + ONE_MIN - now) / 1000);
+    console.warn(`[SECURITY] Rate limit (per-minute) hit for IP ${ip} — ${perMin} req/min`);
+    return { allowed: false, retryAfter, window: 'minute' };
   }
+  if (perHour >= RATE_LIMITS.hour) {
+    const oldest = times.filter(t => t > now - ONE_HOUR)[0];
+    const retryAfter = Math.ceil((oldest + ONE_HOUR - now) / 1000);
+    console.warn(`[SECURITY] Rate limit (per-hour) hit for IP ${ip} — ${perHour} req/hour`);
+    return { allowed: false, retryAfter, window: 'hour' };
+  }
+  if (perDay >= RATE_LIMITS.day) {
+    const oldest = times[0];
+    const retryAfter = Math.ceil((oldest + ONE_DAY - now) / 1000);
+    console.warn(`[SECURITY] Rate limit (per-day) hit for IP ${ip} — ${perDay} req/day`);
+    return { allowed: false, retryAfter, window: 'day' };
+  }
+
   times.push(now);
   _rateLimitMap.set(ip, times);
-  return true;
+  return { allowed: true };
+}
+
+// ---------------------------------------------------------------------------
+// Response sanitisation — never leak internals to the client
+// ---------------------------------------------------------------------------
+
+// Error messages that are safe to forward verbatim to the client.
+const SAFE_ERROR_PREFIXES = [
+  'Anthropic ',
+  'No text content',
+  'images array',
+  'each image',
+  'maximum ',
+  'image[',
+  'vehicle ',
+  'userInputs ',
+  'make ',
+  'model ',
+  'year ',
+  'state ',
+  'postcode ',
+  'mileage ',
+  'askingPrice ',
+  'Method not allowed',
+  'vehicle object',
+  'userInputs object',
+];
+
+function sanitiseError(err) {
+  const msg = err?.message ?? 'Internal server error';
+  // Forward only messages that are known-safe (validation / Anthropic errors)
+  if (SAFE_ERROR_PREFIXES.some(p => msg.startsWith(p))) return msg;
+  // All other internal errors (Supabase, network, etc.) get a generic message;
+  // the full detail is already logged server-side via console.error.
+  return 'Internal server error';
 }
 
 // ---------------------------------------------------------------------------
@@ -407,10 +495,12 @@ async function saveScan(vehicle, userInputs, pricingResult, comparableMeta) {
 }
 
 module.exports = {
+  checkAppSecret,
   checkRateLimit,
   callAnthropic,
   getComparableListings,
   saveScan,
+  sanitiseError,
   PHASE1_SYSTEM_PROMPT,
   buildPhase1UserPrompt,
   PHASE2_SYSTEM_PROMPT,
