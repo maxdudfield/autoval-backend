@@ -442,14 +442,74 @@ Return the valuation JSON as specified in the system prompt.`;
 }
 
 // ---------------------------------------------------------------------------
+// Garage revaluation prompt (text-only, no photos)
+// ---------------------------------------------------------------------------
+
+function buildRevalueUserPrompt(car, comparables = []) {
+  const year = parseInt(car.year) || new Date().getFullYear() - 5;
+  const ageYears = Math.max(1, new Date().getFullYear() - year);
+  const estimatedOdo = (ageYears * 15_000).toLocaleString();
+
+  let comparablesSection;
+  if (comparables.length >= 1) {
+    const lines = comparables.map(c => {
+      const odo = c.odometer ? `${c.odometer.toLocaleString()}km` : 'odo unknown';
+      const seller = c.dealer_or_private ? ` (${c.dealer_or_private})` : '';
+      return `- ${c.year} ${c.make} ${c.model}${c.trim ? ' ' + c.trim : ''}, ${odo}, ${c.state ?? '?'}${seller} — $${c.price.toLocaleString()}`;
+    }).join('\n');
+    comparablesSection = `\nREAL COMPARABLE LISTINGS FROM CARSALES.COM.AU (ASKING PRICES):\n${lines}\n\nIMPORTANT: These are ASKING PRICES. Apply a 10% reduction for realistic transaction prices.`;
+  } else {
+    comparablesSection = '\nNote: No live comparable listings found. Base valuation on estimated market data.';
+  }
+
+  return `Please provide a current market valuation for this Australian vehicle (automatic garage revaluation — no photos available):
+
+Vehicle: ${car.year} ${car.make} ${car.model}${car.trim ? ' ' + car.trim : ''}
+Body type: ${car.bodyType || 'unknown'}
+State: ${car.state || 'NSW'}
+
+Note: This is an automatic revaluation — no odometer or condition data is available.
+Estimated odometer based on age (~15,000 km/year): approximately ${estimatedOdo} km (${ageYears} year${ageYears === 1 ? '' : 's'} old).
+Assume average condition for age and type.
+${comparablesSection}
+
+Return the valuation JSON as specified in the system prompt.`;
+}
+
+// ---------------------------------------------------------------------------
+// Market average — median valuation_mid from scans table for this vehicle
+// ---------------------------------------------------------------------------
+
+async function getMarketAverage(make, model, year) {
+  const supabase = getSupabase();
+  if (!supabase) return null;
+
+  const { data, error } = await supabase
+    .from('scans')
+    .select('valuation_mid')
+    .ilike('make', normaliseMake(make))
+    .ilike('model', buildModelPattern(model))
+    .gte('year', year - 1)
+    .lte('year', year + 1)
+    .not('valuation_mid', 'is', null)
+    .limit(100);
+
+  if (error || !data || data.length < 3) return null;
+
+  const sorted = data.map(r => r.valuation_mid).sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)]; // median
+}
+
+// ---------------------------------------------------------------------------
 // Scan analytics persistence
 // ---------------------------------------------------------------------------
 
 /**
  * Fire-and-forget: saves an anonymous scan record to the scans table.
  * Never throws — a save failure must not affect the user's response.
+ * isGarageRevaluation = true when called from /api/revalue-garage.
  */
-async function saveScan(vehicle, userInputs, pricingResult, comparableMeta) {
+async function saveScan(vehicle, userInputs, pricingResult, comparableMeta, isGarageRevaluation = false) {
   try {
     const supabase = getSupabase();
     if (!supabase) return;
@@ -479,9 +539,10 @@ async function saveScan(vehicle, userInputs, pricingResult, comparableMeta) {
       comparables_found:    pricingResult.comparables?.totalFound,
       regional_demand:      pricingResult.comparables?.regionalDemandIndex,
       market_velocity:      pricingResult.comparables?.marketVelocity,
-      used_real_listings:   comparableMeta?.source === 'real_listings',
-      real_listings_count:  comparableMeta?.totalFound ?? 0,
-      app_version:          '1.0',
+      used_real_listings:      comparableMeta?.source === 'real_listings',
+      real_listings_count:     comparableMeta?.totalFound ?? 0,
+      is_garage_revaluation:   isGarageRevaluation,
+      app_version:             '1.0',
     });
 
     if (error) {
@@ -499,10 +560,12 @@ module.exports = {
   checkRateLimit,
   callAnthropic,
   getComparableListings,
+  getMarketAverage,
   saveScan,
   sanitiseError,
   PHASE1_SYSTEM_PROMPT,
   buildPhase1UserPrompt,
   PHASE2_SYSTEM_PROMPT,
   buildPhase2UserPrompt,
+  buildRevalueUserPrompt,
 };
