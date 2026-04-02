@@ -10,7 +10,7 @@ module.exports.config = {
 // ---------------------------------------------------------------------------
 
 const MAX_IMAGES      = 5;
-const MAX_B64_BYTES   = Math.ceil(2 * 1024 * 1024 * (4 / 3)); // 2 MB → base64 length
+const MAX_B64_BYTES   = Math.ceil(4 * 1024 * 1024 * (4 / 3)); // 4 MB decoded → base64 length
 const VALID_MIMES     = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const BASE64_RE       = /^[A-Za-z0-9+/]+=*$/;
 
@@ -26,7 +26,7 @@ function validateImages(images) {
     if (!BASE64_RE.test(img.b64))
       return `image[${i}]: b64 is not valid base64`;
     if (img.b64.length > MAX_B64_BYTES)
-      return `image[${i}]: exceeds maximum size of 2 MB`;
+      return `image[${i}]: exceeds maximum size of 4 MB`;
     const mime = img.mime ?? 'image/jpeg';
     if (!VALID_MIMES.has(mime))
       return `image[${i}]: mime must be image/jpeg, image/png, or image/webp`;
