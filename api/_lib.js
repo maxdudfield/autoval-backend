@@ -415,6 +415,10 @@ Verdict rules (based on asking vs your finalValuation.mid):
 - asking below mid by more than 15% → "excellent_deal"
 suggestedOffer.low = mid * 0.90, suggestedOffer.high = mid * 0.97 (always use market mid, not asking price).` : '';
 
+  const additionalDetailsSection = inputs.additionalDetails
+    ? `\n\nADDITIONAL DETAILS PROVIDED BY OWNER:\n${inputs.additionalDetails}\n\nFactor these details into your valuation:\n- Custom fitouts (canopies, bullbars, tow bars) typically add $500–$3,000 depending on quality\n- Performance modifications can add or subtract value depending on type\n- Recent service history adds confidence\n- New tyres typically add $400–$800\n- Upgraded audio/tech adds $200–$800\n- Custom interiors vary widely\n- Damage or issues should reduce the valuation accordingly\nIf the owner mentions significant extras, note them in pricingDrivers and explain the impact in marketInsight.`
+    : '';
+
   return `Please provide a market valuation for the following Australian vehicle:
 
 Vehicle: ${vehicle.year} ${vehicle.make} ${vehicle.model} ${vehicle.trim ?? ''}
@@ -436,7 +440,7 @@ Overall: ${vehicle.conditionSignals?.overall}
 
 Detected features: ${features}
 CV identification confidence: ${vehicle.cvConfidence}%
-${comparablesSection}${dealSection}
+${comparablesSection}${additionalDetailsSection}${dealSection}
 
 Return the valuation JSON as specified in the system prompt.`;
 }
@@ -542,6 +546,7 @@ async function saveScan(vehicle, userInputs, pricingResult, comparableMeta, isGa
       used_real_listings:      comparableMeta?.source === 'real_listings',
       real_listings_count:     comparableMeta?.totalFound ?? 0,
       is_garage_revaluation:   isGarageRevaluation,
+      additional_details:      userInputs.additionalDetails ?? null,
       app_version:             '1.0',
     });
 
