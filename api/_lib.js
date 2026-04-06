@@ -547,6 +547,8 @@ async function saveScan(vehicle, userInputs, pricingResult, comparableMeta, isGa
       real_listings_count:     comparableMeta?.totalFound ?? 0,
       is_garage_revaluation:   isGarageRevaluation,
       additional_details:      userInputs.additionalDetails ?? null,
+      user_id:                 userInputs.userId ?? null,
+      scan_mode:               userInputs.scanMode ?? 'valuation',
       app_version:             '1.0',
     });
 
