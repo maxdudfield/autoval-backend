@@ -31,8 +31,11 @@ function validateRequest(vehicle, userInputs) {
     return 'userInputs object is required';
   if (!AU_STATES.has(userInputs.state))
     return `state must be one of: ${[...AU_STATES].join(', ')}`;
-  if (!/^\d{4}$/.test(String(userInputs.postcode ?? '')))
-    return 'postcode must be exactly 4 digits';
+  // Postcode is optional — skip validation when unknown or blank
+  if (!userInputs.postcodeUnknown && userInputs.postcode && userInputs.postcode.trim() !== '') {
+    if (!/^\d{4}$/.test(userInputs.postcode.trim()))
+      return 'postcode must be exactly 4 digits';
+  }
 
   if (!userInputs.mileageUnknown && userInputs.mileage != null) {
     const m = Number(userInputs.mileage);

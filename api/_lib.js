@@ -430,7 +430,7 @@ Owner details:
 Odometer: ${odometer}
 Owner-reported condition: ${inputs.condition}
 State: ${inputs.state}
-Postcode: ${inputs.postcode}
+Postcode: ${(inputs.postcodeUnknown || !inputs.postcode || inputs.postcode.trim() === '') ? `Unknown — use state average pricing for ${inputs.state}` : inputs.postcode}
 
 AI-assessed condition:
 Paint: ${vehicle.conditionSignals?.paint}
