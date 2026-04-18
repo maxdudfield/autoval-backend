@@ -529,6 +529,10 @@ async function saveScan(vehicle, userInputs, pricingResult, comparableMeta, isGa
 
     console.log(`[saveScan] Inserting scan: ${vehicle.year} ${vehicle.make} ${vehicle.model} mid=$${pricingResult.finalValuation?.mid}`);
 
+    const validUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const rawUserId = userInputs.userId ?? null;
+    const safeUserId = rawUserId && validUUID.test(rawUserId) ? rawUserId : null;
+
     const { error } = await supabase.from('scans').insert({
       make:                 vehicle.make,
       model:                vehicle.model,
@@ -558,7 +562,7 @@ async function saveScan(vehicle, userInputs, pricingResult, comparableMeta, isGa
       real_listings_count:     comparableMeta?.totalFound ?? 0,
       is_garage_revaluation:   isGarageRevaluation,
       additional_details:      userInputs.additionalDetails ?? null,
-      user_id:                 userInputs.userId ?? null,
+      user_id:                 safeUserId,
       scan_mode:               userInputs.scanMode ?? 'valuation',
       app_version:             '1.0',
     });
