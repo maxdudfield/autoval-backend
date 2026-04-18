@@ -564,9 +564,9 @@ async function saveScan(vehicle, userInputs, pricingResult, comparableMeta, isGa
     });
 
     if (error) {
-      console.error('[saveScan] insert error:', error.message);
+      console.error('[saveScan] INSERT FAILED — code:', error.code, '| message:', error.message, '| details:', error.details, '| hint:', error.hint);
     } else {
-      console.log(`[saveScan] recorded: ${vehicle.year} ${vehicle.make} ${vehicle.model} $${pricingResult.finalValuation?.mid}`);
+      console.log(`[saveScan] INSERT SUCCESS: ${vehicle.year} ${vehicle.make} ${vehicle.model} $${pricingResult.finalValuation?.mid}`);
     }
   } catch (err) {
     console.error('[saveScan] unexpected error:', err.message);

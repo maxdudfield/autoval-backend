@@ -135,7 +135,7 @@ module.exports = async (req, res) => {
     // ── Step 6: Save scan analytics ──────────────────────────────────────────
     if (!userInputs.analyticsOptOut) {
       console.log(`[value] ▶ Step 6 — Saving scan to Supabase analytics...`);
-      saveScan(vehicle, userInputs, parsed, comparableMeta);
+      await saveScan(vehicle, userInputs, parsed, comparableMeta);
     } else {
       console.log(`[value] ▶ Step 6 — Analytics save skipped (user opted out)`);
     }

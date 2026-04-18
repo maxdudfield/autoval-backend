@@ -95,8 +95,8 @@ module.exports = async (req, res) => {
 
     console.log(`[revalue-garage] ✓ mid=$${parsed.finalValuation?.mid} confidence=${parsed.confidenceScore}`);
 
-    // Step 4: Save analytics (fire-and-forget, flagged as garage revaluation)
-    saveScan(vehicleObj, { ...userInputObj, postcode: '' }, parsed, comparableMeta, true);
+    // Step 4: Save analytics
+    await saveScan(vehicleObj, { ...userInputObj, postcode: '' }, parsed, comparableMeta, true);
 
     return res.status(200).json({
       ...parsed,
