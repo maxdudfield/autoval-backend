@@ -532,7 +532,7 @@ async function saveScan(vehicle, userInputs, pricingResult, comparableMeta, isGa
     const { error } = await supabase.from('scans').insert({
       make:                 vehicle.make,
       model:                vehicle.model,
-      year:                 vehicle.year,
+      year:                 vehicle.year != null ? parseInt(vehicle.year, 10) : null,
       trim:                 vehicle.trim,
       body_type:            vehicle.bodyType,
       colour:               vehicle.colour,

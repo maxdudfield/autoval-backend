@@ -42,6 +42,10 @@ CREATE TABLE IF NOT EXISTS scans (
   -- Meta
   used_real_listings boolean,
   real_listings_count integer,
+  is_garage_revaluation boolean DEFAULT false,
+  additional_details text,
+  user_id text,
+  scan_mode text DEFAULT 'valuation',
   app_version text,
   scan_duration_seconds integer
 );
