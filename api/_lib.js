@@ -10,9 +10,15 @@ function getSupabase() {
   if (!_supabase) {
     const { createClient } = require('@supabase/supabase-js');
     const url = process.env.SUPABASE_URL;
-    const key = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_KEY;
-    if (!url || !key) return null; // not configured — fall back gracefully
+    // Always use the service role key for server-side operations — the anon key
+    // is blocked by RLS policies for INSERT on the scans table.
+    const key = process.env.SUPABASE_SERVICE_KEY;
+    if (!url || !key) {
+      console.warn('[supabase] SUPABASE_URL or SUPABASE_SERVICE_KEY not configured — Supabase disabled');
+      return null;
+    }
     _supabase = createClient(url, key);
+    console.log('[supabase] Client initialised with service key — URL:', url.replace(/https?:\/\//, '').split('.')[0] + '.supabase.co');
   }
   return _supabase;
 }
@@ -516,7 +522,12 @@ async function getMarketAverage(make, model, year) {
 async function saveScan(vehicle, userInputs, pricingResult, comparableMeta, isGarageRevaluation = false) {
   try {
     const supabase = getSupabase();
-    if (!supabase) return;
+    if (!supabase) {
+      console.warn('[saveScan] Supabase not available — skipping save');
+      return;
+    }
+
+    console.log(`[saveScan] Inserting scan: ${vehicle.year} ${vehicle.make} ${vehicle.model} mid=$${pricingResult.finalValuation?.mid}`);
 
     const { error } = await supabase.from('scans').insert({
       make:                 vehicle.make,
