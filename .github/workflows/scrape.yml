@@ -1,0 +1,32 @@
+name: Bi-monthly listings scrape
+
+on:
+  schedule:
+    # 1st of every month at 02:00 UTC
+    - cron: '0 2 1 * *'
+    # 15th of every month at 02:00 UTC
+    - cron: '0 2 15 * *'
+  # Allow manual trigger from GitHub Actions tab
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run scraper
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: node scraper/runNightly.js
