@@ -52,6 +52,35 @@ function buildModelPattern(model) {
 }
 
 /**
+// ---------------------------------------------------------------------------
+// Listing adjustment helpers — recency weight + days-listed discount
+// ---------------------------------------------------------------------------
+
+function daysListedDiscount(daysListed) {
+  if (daysListed == null || daysListed < 0) return 0.10; // unknown — use default
+  if (daysListed <= 14) return 0.05;   // fresh, near asking price
+  if (daysListed <= 30) return 0.10;
+  if (daysListed <= 60) return 0.15;
+  return 0.18;                          // clearly overpriced
+}
+
+function recencyWeight(scrapedAt) {
+  if (!scrapedAt) return 1.0;
+  const ageDays = (Date.now() - new Date(scrapedAt).getTime()) / 86_400_000;
+  return ageDays <= 30 ? 2.0 : 1.0;
+}
+
+function applyListingAdjustments(listings) {
+  return listings.map(l => {
+    const discount = daysListedDiscount(l.days_listed);
+    const weight   = recencyWeight(l.scraped_at);
+    const adjustedPrice = Math.round(l.price * (1 - discount));
+    return { ...l, price: adjustedPrice, _originalPrice: l.price, _discount: discount, _weight: weight };
+  });
+}
+
+// ---------------------------------------------------------------------------
+/**
  * Returns comparable carsales.com.au listings for the vehicle.
  * Progressive fallback: state+tight mileage → national+tight → state+wide → national+wide → state only.
  * Minimum threshold: 5 listings before falling back to Claude estimate.
@@ -97,6 +126,7 @@ async function getComparableListings(vehicle, userInputs) {
     { stateFilter: state, oLow: wideLow,   oHigh: wideHigh,  isState: true,  isMileage: true,  label: 'state+wide-mileage' },
     { stateFilter: null,  oLow: wideLow,   oHigh: wideHigh,  isState: false, isMileage: true,  label: 'national+wide-mileage' },
     { stateFilter: state, oLow: null,      oHigh: null,      isState: true,  isMileage: false, label: 'state+any-mileage' },
+    { stateFilter: null,  oLow: null,      oHigh: null,      isState: false, isMileage: false, label: 'national+any-mileage' },
   ];
 
   for (const { stateFilter, oLow, oHigh, isState, isMileage, label } of attempts) {
@@ -111,12 +141,38 @@ async function getComparableListings(vehicle, userInputs) {
       return { listings: [], isStateSpecific: false, isMileageFiltered: false, totalFound: 0, source: 'no_data' };
     }
 
-    const count = data?.length ?? 0;
-    console.log(`[comparables] Attempt "${label}": ${count} results`);
+    const rawCount = data?.length ?? 0;
+
+    // Recency filter — drop listings scraped more than 60 days ago
+    const cutoffMs = 60 * 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    const fresh = (data ?? []).filter(l => !l.scraped_at || (now - new Date(l.scraped_at).getTime()) <= cutoffMs);
+    const droppedByRecency = rawCount - fresh.length;
+    if (droppedByRecency > 0) {
+      console.log(`[comparables] Recency filter: dropped ${droppedByRecency}/${rawCount} listings older than 60 days`);
+    }
+
+    const count = fresh.length;
+    console.log(`[comparables] Attempt "${label}": ${count} fresh results (${rawCount} raw)`);
 
     if (count >= MIN_LISTINGS) {
-      console.log(`[comparables] ✓ Threshold met (${count} >= ${MIN_LISTINGS}) — using real listings`);
-      return { listings: data, isStateSpecific: isState, isMileageFiltered: isMileage, totalFound: count, source: 'real_listings' };
+      console.log(`[comparables] ✓ Threshold met (${count} >= ${MIN_LISTINGS}) — applying days-listed discounts`);
+
+      // Apply per-listing days-on-market discount to convert asking → transaction price
+      const adjusted = applyListingAdjustments(fresh);
+
+      // Logging: compare simple avg (raw) vs weighted adjusted avg
+      const simpleAvg = Math.round(fresh.reduce((s, l) => s + l.price, 0) / fresh.length);
+      const weightedSum = adjusted.reduce((s, l) => s + l.price * l._weight, 0);
+      const totalWeight  = adjusted.reduce((s, l) => s + l._weight, 0);
+      const weightedAdj  = Math.round(weightedSum / totalWeight);
+      console.log(`[comparables] Price stats — simple avg (raw asking): $${simpleAvg.toLocaleString()} | weighted adj avg: $${weightedAdj.toLocaleString()}`);
+
+      adjusted.forEach(l => {
+        console.log(`[comparables]   ${l.year} ${l.make} ${l.model}: $${l._originalPrice.toLocaleString()} → $${l.price.toLocaleString()} (-${Math.round(l._discount * 100)}%, ${l.days_listed ?? '?'}d listed, weight=${l._weight})`);
+      });
+
+      return { listings: adjusted, isStateSpecific: isState, isMileageFiltered: isMileage, totalFound: count, source: 'real_listings' };
     }
   }
 
@@ -326,7 +382,7 @@ The user will provide confirmed vehicle details. Your job is to produce a conser
 IMPORTANT CALIBRATION — Australian used car market reality:
 - Listing prices on carsales.com.au are typically 8-15% above actual transaction prices due to negotiation
 - Your valuations must reflect TRANSACTION values, not listing prices
-- Apply a market reality discount of approximately 10-12% to any comparable listing prices you reference
+- When comparable listings are provided, prices have already been adjusted to estimated transaction values — use them directly as transaction-price references, not asking prices
 - Private sales typically achieve 5-8% less than dealer asking prices
 - The Australian used car market has softened significantly since the 2021-2022 peak — prices have come down 10-20% from those highs
 - Be conservative rather than optimistic — it is better to slightly undervalue than overvalue, as users will lose trust if they cannot achieve the stated price
@@ -368,7 +424,7 @@ Required JSON schema:
 Rules:
 - Return ONLY the JSON object. No markdown fences.
 - All prices in AUD, representing realistic TRANSACTION prices for the current Australian used-car market.
-- Use the median comparable as the base mid estimate, THEN apply a 10% market reality adjustment downward to convert listing prices to realistic transaction prices. The mid value should represent what a buyer would realistically pay, not what a seller hopes to achieve.
+- When comparable listings are provided, they are already adjusted to estimated transaction prices — use the median directly as your base mid estimate without any further listing-to-transaction discount. The mid value should represent what a buyer would realistically pay, not what a seller hopes to achieve.
 - finalValuation must incorporate all adjustments applied to baseValuation.mid.
 - Provide 3–6 adjustments — include condition, colour, regional demand, and any notable features.
 - The low-mid-high range should typically span no more than 15-20% total (e.g. Low: $26,000 / Mid: $28,500 / High: $31,000 — NOT Low: $22,000 / Mid: $30,000 / High: $38,000). A tight range is more useful.
@@ -394,9 +450,9 @@ function buildPhase2UserPrompt(vehicle, inputs, comparables = []) {
       return `- ${c.year} ${c.make} ${c.model}${c.trim ? ' ' + c.trim : ''}, ${odo}, ${c.state ?? '?'}${seller} — $${c.price.toLocaleString()}`;
     }).join('\n');
 
-    comparablesSection = `\nREAL COMPARABLE LISTINGS FROM CARSALES.COM.AU (ASKING PRICES):\n${lines}\n\nIMPORTANT: These are ASKING PRICES, not transaction prices. Apply a 10% reduction to convert to realistic transaction prices before calculating your valuation range. Calculate the median asking price, remove outliers beyond 1.5× IQR, then apply the 10% listing-to-transaction discount to set your baseValuation. Set comparables.totalFound and comparables.afterOutlierRemoval based on this data.`;
+    comparablesSection = `\nREAL COMPARABLE LISTINGS — PRE-ADJUSTED TRANSACTION VALUES:\n${lines}\n\nIMPORTANT: These prices have already been adjusted from asking price to estimated transaction price based on days listed on market. Use them directly as transaction-value references — do NOT apply any further listing-to-transaction discount. Calculate the median, remove outliers beyond 1.5× IQR, and use that as your baseValuation.mid. Set comparables.totalFound and comparables.afterOutlierRemoval based on this data.`;
   } else {
-    comparablesSection = '\nNote: No live AutoTrader AU listings found for this specification. Base your valuation on estimated market data and note "Based on estimated market data — no live listings found for this specification" in confidenceFactors. Use a reduced confidenceScore.';
+    comparablesSection = '\nNote: No live carsales.com.au listings were found for this specification. You are estimating without real comparable data.\n\nAustralian private sale transaction prices are typically 15-20% below asking prices. Apply an 18% reduction to any listing-based anchor price you use when deriving your valuation range.\n\nBase your valuation on your knowledge of the Australian used-car market, apply the 18% transaction discount to any reference prices, and note "Based on estimated market data — no live listings found for this specification" in confidenceFactors. Use a reduced confidenceScore.';
   }
 
   const isDeal = inputs.scanMode === 'deal' && inputs.askingPrice > 0;
@@ -467,7 +523,7 @@ function buildRevalueUserPrompt(car, comparables = []) {
       const seller = c.dealer_or_private ? ` (${c.dealer_or_private})` : '';
       return `- ${c.year} ${c.make} ${c.model}${c.trim ? ' ' + c.trim : ''}, ${odo}, ${c.state ?? '?'}${seller} — $${c.price.toLocaleString()}`;
     }).join('\n');
-    comparablesSection = `\nREAL COMPARABLE LISTINGS FROM CARSALES.COM.AU (ASKING PRICES):\n${lines}\n\nIMPORTANT: These are ASKING PRICES. Apply a 10% reduction for realistic transaction prices.`;
+    comparablesSection = `\nREAL COMPARABLE LISTINGS — PRE-ADJUSTED TRANSACTION VALUES:\n${lines}\n\nIMPORTANT: These prices have already been adjusted from asking price to estimated transaction price. Use them directly as transaction-value references — do NOT apply any further discount.`;
   } else {
     comparablesSection = '\nNote: No live comparable listings found. Base valuation on estimated market data.';
   }
@@ -533,7 +589,7 @@ async function saveScan(vehicle, userInputs, pricingResult, comparableMeta, isGa
     const rawUserId = userInputs.userId ?? null;
     const safeUserId = rawUserId && validUUID.test(rawUserId) ? rawUserId : null;
 
-    const { error } = await supabase.from('scans').insert({
+    const { data: insertedRow, error } = await supabase.from('scans').insert({
       make:                 vehicle.make,
       model:                vehicle.model,
       year:                 vehicle.year != null ? parseInt(vehicle.year, 10) : null,
@@ -565,15 +621,18 @@ async function saveScan(vehicle, userInputs, pricingResult, comparableMeta, isGa
       user_id:                 safeUserId,
       scan_mode:               userInputs.scanMode ?? 'valuation',
       app_version:             '1.0',
-    });
+    }).select('id').single();
 
     if (error) {
       console.error('[saveScan] INSERT FAILED — code:', error.code, '| message:', error.message, '| details:', error.details, '| hint:', error.hint);
-    } else {
-      console.log(`[saveScan] INSERT SUCCESS: ${vehicle.year} ${vehicle.make} ${vehicle.model} $${pricingResult.finalValuation?.mid}`);
+      return null;
     }
+
+    console.log(`[saveScan] INSERT SUCCESS: ${vehicle.year} ${vehicle.make} ${vehicle.model} $${pricingResult.finalValuation?.mid} id=${insertedRow?.id}`);
+    return insertedRow?.id ?? null;
   } catch (err) {
     console.error('[saveScan] unexpected error:', err.message);
+    return null;
   }
 }
 

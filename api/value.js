@@ -133,18 +133,20 @@ module.exports = async (req, res) => {
     console.log(`[value] ▶ Step 5 — Claude responded — valuation mid: $${parsed.finalValuation?.mid?.toLocaleString() ?? 'n/a'} confidence: ${parsed.confidenceScore ?? 'n/a'}%`);
 
     // ── Step 6: Save scan analytics ──────────────────────────────────────────
+    let scanId = null;
     if (!userInputs.analyticsOptOut) {
       console.log(`[value] ▶ Step 6 — Saving scan to Supabase analytics...`);
-      await saveScan(vehicle, userInputs, parsed, comparableMeta);
+      scanId = await saveScan(vehicle, userInputs, parsed, comparableMeta);
     } else {
       console.log(`[value] ▶ Step 6 — Analytics save skipped (user opted out)`);
     }
 
     // ── Step 7: Return result ─────────────────────────────────────────────────
-    console.log(`[value] ▶ Step 7 — Complete — returning result to iOS app (source=${source} listings=${totalFound})`);
+    console.log(`[value] ▶ Step 7 — Complete — returning result to iOS app (source=${source} listings=${totalFound} scanId=${scanId ?? 'none'})`);
 
     return res.status(200).json({
       ...parsed,
+      scanId,                             // Supabase UUID — stored in iOS for feedback linkage
       dataSource:            source,
       realListingsUsed:      totalFound,
       listingsStateSpecific: isStateSpecific,

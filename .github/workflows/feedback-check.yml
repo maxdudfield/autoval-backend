@@ -1,0 +1,35 @@
+name: Daily feedback prompt check
+
+on:
+  schedule:
+    # 10:00 UTC daily = 8:00 PM AEST — good time to catch evening app opens
+    - cron: '0 10 * * *'
+  # Allow manual trigger from GitHub Actions tab
+  workflow_dispatch:
+
+jobs:
+  check-pending:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Trigger feedback check endpoint
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            -H "Content-Type: application/json" \
+            -H "x-autoval-secret: ${{ secrets.APP_SECRET }}" \
+            https://autoval-backend.vercel.app/api/feedback/check-pending)
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | head -n-1)
+
+          echo "HTTP $HTTP_CODE"
+          echo "$BODY"
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "❌ Endpoint returned HTTP $HTTP_CODE"
+            exit 1
+          fi
+
+          INSERTED=$(echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('inserted', 0))" 2>/dev/null || echo "unknown")
+          echo "✓ Inserted $INSERTED pending feedback row(s)"

@@ -20,10 +20,13 @@ module.exports = async (req, res) => {
   }
 
   const { createClient } = require('@supabase/supabase-js');
-  const supabase = createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY
-  );
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_KEY;
+  if (!url || !key) {
+    console.error('[user/delete] SUPABASE_URL or SUPABASE_SERVICE_KEY not configured');
+    return res.status(500).json({ error: 'Server configuration error' });
+  }
+  const supabase = createClient(url, key);
 
   try {
     // 1. Delete garage cars
@@ -37,10 +40,14 @@ module.exports = async (req, res) => {
       // Non-fatal — continue
     }
 
-    // 2. Anonymise scans (preserve anonymous data, remove user link)
+    // 2. Anonymise scans — null all user-identifying fields, keep market data
     const { error: scansError } = await supabase
       .from('scans')
-      .update({ user_id: null })
+      .update({
+        user_id:            null,
+        postcode:           null,  // could narrow location to suburb
+        additional_details: null,  // free-text field — may contain PII
+      })
       .eq('user_id', user_id);
 
     if (scansError) {

@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS scans (
   mileage_unknown boolean,
   user_condition text,
   state text,
-  postcode text,
+  postcode text,           -- nulled on account deletion
 
   -- Valuation results
   valuation_low integer,
@@ -43,8 +43,8 @@ CREATE TABLE IF NOT EXISTS scans (
   used_real_listings boolean,
   real_listings_count integer,
   is_garage_revaluation boolean DEFAULT false,
-  additional_details text,
-  user_id text,
+  additional_details text, -- nulled on account deletion (free-text, may contain PII)
+  user_id text,            -- nulled on account deletion
   scan_mode text DEFAULT 'valuation',
   app_version text,
   scan_duration_seconds integer
