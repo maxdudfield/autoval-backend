@@ -51,7 +51,6 @@ function buildModelPattern(model) {
     .replace(/(\d)([a-z])/g, '$1%$2');  // digit→letter: "3series" → "3%series"
 }
 
-/**
 // ---------------------------------------------------------------------------
 // Listing adjustment helpers — recency weight + days-listed discount
 // ---------------------------------------------------------------------------

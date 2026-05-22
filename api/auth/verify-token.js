@@ -23,14 +23,14 @@ module.exports = async (req, res) => {
   const { createClient } = require('@supabase/supabase-js');
   const supabase = createClient(
     process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY
+    process.env.SUPABASE_SERVICE_KEY
   );
 
   // Verify the JWT with Supabase
   const { data: { user }, error: authError } = await supabase.auth.getUser(access_token);
   if (authError || !user) {
     console.warn('[verify-token] Invalid token:', authError?.message);
-    return res.status(401).json({ error: 'Invalid or expired sign-in link. Please request a new one.' });
+    return res.status(401).json({ error: 'This sign-in link has expired or already been used. Enter your email below to receive a new one.' });
   }
 
   console.log(`[verify-token] ▶ verified user ${user.id.slice(0, 8)}…`);
