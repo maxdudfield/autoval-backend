@@ -78,11 +78,16 @@ module.exports = withErrorReporting(async (req, res) => {
     // look up our_valuation_mid from the scans table to populate it.
     let ourValuationMid = existingRow?.our_valuation_mid ?? null;
     if (!existingRow) {
-      const { data: scanRow } = await supabase
+      const { data: scanRow, error: scanError } = await supabase
         .from('scans')
         .select('valuation_mid, user_id')
         .eq('id', scan_id)
         .single();
+
+      if (scanError) {
+        console.error('[feedback/submit] scan lookup error:', scanError.message);
+        return res.status(500).json({ error: sanitiseError(scanError) });
+      }
 
       // Security: ensure the submitting user owns this scan
       if (!scanRow || scanRow.user_id !== user_id) {
@@ -131,12 +136,15 @@ module.exports = withErrorReporting(async (req, res) => {
     }
 
     // Count total responses from this user (their data contribution score)
-    const { count } = await supabase
+    const { count, error: countError } = await supabase
       .from('scan_outcomes')
       .select('id', { count: 'exact', head: true })
       .eq('user_id', user_id)
       .not('responded_at', 'is', null);
 
+    if (countError) {
+      console.error('[feedback/submit] count error:', countError.message);
+    }
     const contributions = count ?? 1;
 
     console.log(`[feedback/submit] outcome="${outcome}" variance=${variancePct != null ? variancePct + '%' : 'n/a'} user=${user_id.slice(0, 8)}… contributions=${contributions}`);
