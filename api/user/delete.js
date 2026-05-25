@@ -6,8 +6,9 @@
 // Requires: x-autoval-secret header + { user_id } body.
 
 const { checkAppSecret, sanitiseError } = require('../_lib');
+const { withErrorReporting } = require('../_lib/errorReporter');
 
-module.exports = async (req, res) => {
+module.exports = withErrorReporting(async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'DELETE') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -80,4 +81,4 @@ module.exports = async (req, res) => {
     console.error('[user/delete] unexpected error:', err.message);
     return res.status(500).json({ error: sanitiseError(err) });
   }
-};
+});

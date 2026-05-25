@@ -3,10 +3,8 @@
 // Fire-and-forget — never blocks the user's scan flow.
 
 const { checkAppSecret, sanitiseError } = require('./_lib');
-
-module.exports.config = {
-  api: { bodyParser: { sizeLimit: '100kb' } },
-};
+const { withErrorReporting } = require('./_lib/errorReporter');
+const { createClient } = require('@supabase/supabase-js');
 
 const MAX_BATCH = 50;
 const VALID_EVENT_TYPES = new Set([
@@ -28,7 +26,7 @@ const VALID_EVENT_TYPES = new Set([
   'app_opened', 'app_backgrounded', 'signed_out',
 ]);
 
-module.exports = async (req, res) => {
+const handler = withErrorReporting(async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -67,15 +65,11 @@ module.exports = async (req, res) => {
   }
 
   // Gracefully handle missing Supabase config — don't fail clients
-  const { createClient } = require('@supabase/supabase-js');
-  if (!process.env.SUPABASE_URL) {
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
     return res.status(200).json({ success: true, count: 0, note: 'Supabase not configured' });
   }
 
-  const supabase = createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY
-  );
+  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 
   const { error } = await supabase.from('events').insert(batch);
   if (error) {
@@ -86,4 +80,7 @@ module.exports = async (req, res) => {
 
   console.log(`[events] ✓ recorded ${batch.length} event(s): ${[...new Set(batch.map(e => e.event_type))].join(', ')}`);
   return res.status(200).json({ success: true, count: batch.length });
-};
+});
+
+handler.config = { api: { bodyParser: { sizeLimit: '100kb' } } };
+module.exports = handler;

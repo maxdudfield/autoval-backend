@@ -4,12 +4,13 @@
 // No Supabase auth JWT is issued — we use apple_user_id as the stable identifier.
 
 const { checkAppSecret } = require('../_lib');
+const { withErrorReporting } = require('../_lib/errorReporter');
 
 module.exports.config = {
   api: { bodyParser: { sizeLimit: '10kb' } },
 };
 
-module.exports = async (req, res) => {
+module.exports = withErrorReporting(async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -115,4 +116,4 @@ module.exports = async (req, res) => {
     member_since:         profile.created_at,
     sign_in_provider:     'apple',
   });
-};
+});

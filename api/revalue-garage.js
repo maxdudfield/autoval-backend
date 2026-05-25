@@ -7,6 +7,7 @@ const {
   getComparableListings, getMarketAverage, saveScan,
   sanitiseError, PHASE2_SYSTEM_PROMPT, buildRevalueUserPrompt,
 } = require('./_lib');
+const { withErrorReporting } = require('./_lib/errorReporter');
 
 module.exports.config = {
   api: { bodyParser: { sizeLimit: '100kb' } },
@@ -35,7 +36,7 @@ function validateCar(car) {
 // Handler
 // ---------------------------------------------------------------------------
 
-module.exports = async (req, res) => {
+module.exports = withErrorReporting(async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -108,4 +109,4 @@ module.exports = async (req, res) => {
     console.error(`[revalue-garage] ✗ ${err.message}`);
     return res.status(err.status ?? 500).json({ error: sanitiseError(err) });
   }
-};
+});

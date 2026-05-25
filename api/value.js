@@ -1,8 +1,5 @@
 const { checkAppSecret, checkRateLimit, callAnthropic, getComparableListings, saveScan, sanitiseError, PHASE2_SYSTEM_PROMPT, buildPhase2UserPrompt } = require('./_lib');
-
-module.exports.config = {
-  api: { bodyParser: { sizeLimit: '1mb' } },
-};
+const { withErrorReporting } = require('./_lib/errorReporter');
 
 // ---------------------------------------------------------------------------
 // Validation constants
@@ -56,7 +53,7 @@ function validateRequest(vehicle, userInputs) {
 // Handler
 // ---------------------------------------------------------------------------
 
-module.exports = async (req, res) => {
+const handler = withErrorReporting(async (req, res) => {
   // CORS preflight
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -156,4 +153,7 @@ module.exports = async (req, res) => {
     console.error(`[value] ✗ Error: ${err.message}`);
     return res.status(err.status ?? 500).json({ error: sanitiseError(err) });
   }
-};
+});
+
+handler.config = { api: { bodyParser: { sizeLimit: '1mb' } } };
+module.exports = handler;

@@ -3,8 +3,10 @@
 // Requires: Authorization: Bearer <access_token> header.
 
 const { checkAppSecret, sanitiseError } = require('../_lib');
+const { withErrorReporting } = require('../_lib/errorReporter');
+const { createClient } = require('@supabase/supabase-js');
 
-module.exports = async (req, res) => {
+module.exports = withErrorReporting(async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -14,11 +16,13 @@ module.exports = async (req, res) => {
   const accessToken = authHeader.replace(/^Bearer\s+/i, '').trim();
   if (!accessToken) return res.status(401).json({ error: 'Authorization header required' });
 
-  const { createClient } = require('@supabase/supabase-js');
-  const supabase = createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY
-  );
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_KEY;
+  if (!url || !key) {
+    console.error('[user/scans] SUPABASE_URL or SUPABASE_SERVICE_KEY not configured');
+    return res.status(500).json({ error: 'Server configuration error' });
+  }
+  const supabase = createClient(url, key);
 
   // Verify the token and get the user
   const { data: { user }, error: authError } = await supabase.auth.getUser(accessToken);
@@ -34,10 +38,10 @@ module.exports = async (req, res) => {
       confidence_score, market_insight,
       state, odometer, mileage_unknown,
       user_condition, scan_mode,
-      created_at
+      scanned_at
     `)
     .eq('user_id', user.id)
-    .order('created_at', { ascending: false })
+    .order('scanned_at', { ascending: false })
     .limit(50);
 
   if (error) {
@@ -47,4 +51,4 @@ module.exports = async (req, res) => {
 
   console.log(`[user/scans] returned ${data?.length ?? 0} scans for user ${user.id.slice(0, 8)}…`);
   return res.status(200).json({ scans: data ?? [] });
-};
+});

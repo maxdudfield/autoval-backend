@@ -4,12 +4,13 @@
 // Returns the user profile so the iOS app can store it.
 
 const { checkAppSecret, sanitiseError } = require('../_lib');
+const { withErrorReporting } = require('../_lib/errorReporter');
 
 module.exports.config = {
   api: { bodyParser: { sizeLimit: '10kb' } },
 };
 
-module.exports = async (req, res) => {
+module.exports = withErrorReporting(async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -73,4 +74,4 @@ module.exports = async (req, res) => {
     total_scans:           profile.total_scans ?? 0,
     member_since:          profile.created_at,
   });
-};
+});

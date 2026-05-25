@@ -1,9 +1,5 @@
 const { checkAppSecret, checkRateLimit, callAnthropic, sanitiseError, PHASE1_SYSTEM_PROMPT, buildPhase1UserPrompt } = require('./_lib');
-
-// Increase body size limit to handle multiple base64 images.
-module.exports.config = {
-  api: { bodyParser: { sizeLimit: '10mb' } },
-};
+const { withErrorReporting } = require('./_lib/errorReporter');
 
 // ---------------------------------------------------------------------------
 // Validation constants
@@ -38,7 +34,7 @@ function validateImages(images) {
 // Handler
 // ---------------------------------------------------------------------------
 
-module.exports = async (req, res) => {
+const handler = withErrorReporting(async (req, res) => {
   // CORS preflight
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -94,4 +90,10 @@ module.exports = async (req, res) => {
     console.error('[scan] error:', err.message);
     return res.status(err.status ?? 500).json({ error: sanitiseError(err) });
   }
-};
+});
+
+// Must be set after handler assignment — setting on module.exports before
+// reassignment loses the config property.
+handler.config = { api: { bodyParser: { sizeLimit: '10mb' } } };
+
+module.exports = handler;
