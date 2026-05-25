@@ -16,7 +16,8 @@ module.exports = withErrorReporting(async (req, res) => {
 
   if (!checkAppSecret(req)) return res.status(401).json({ error: 'Unauthorised' });
 
-  const { apple_user_id, email, full_name } = req.body ?? {};
+  const { apple_user_id, email, full_name: rawFullName } = req.body ?? {};
+  const full_name = typeof rawFullName === 'string' ? rawFullName.slice(0, 100).trim() : null;
 
   if (!apple_user_id || typeof apple_user_id !== 'string') {
     return res.status(400).json({ error: 'apple_user_id required' });

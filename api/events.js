@@ -7,6 +7,12 @@ const { withErrorReporting } = require('./_lib/errorReporter');
 const { createClient } = require('@supabase/supabase-js');
 
 const MAX_BATCH = 50;
+
+function coerceTimestamp(raw) {
+  if (!raw) return new Date().toISOString();
+  const t = new Date(raw).getTime();
+  return isNaN(t) ? new Date().toISOString() : new Date(t).toISOString();
+}
 const VALID_EVENT_TYPES = new Set([
   // Scan lifecycle
   'scan_started', 'scan_mode_selected', 'scan_photo_taken',
