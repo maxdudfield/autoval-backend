@@ -15,9 +15,10 @@ module.exports = withErrorReporting(async (req, res) => {
   const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() ?? 'unknown';
   if (!checkAppSecret(req, ip)) return res.status(401).json({ error: 'Unauthorised' });
 
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const { user_id } = req.body ?? {};
-  if (!user_id || typeof user_id !== 'string' || user_id.trim().length === 0) {
-    return res.status(400).json({ error: 'user_id is required' });
+  if (!user_id || typeof user_id !== 'string' || !UUID_RE.test(user_id)) {
+    return res.status(400).json({ error: 'user_id must be a valid UUID' });
   }
 
   const { createClient } = require('@supabase/supabase-js');

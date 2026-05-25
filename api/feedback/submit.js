@@ -15,6 +15,7 @@ const { checkAppSecret, sanitiseError } = require('../_lib');
 const { withErrorReporting } = require('../_lib/errorReporter');
 
 const VALID_OUTCOMES = new Set(['sold', 'still_listed', 'kept', 'declined_to_say']);
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 module.exports = withErrorReporting(async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -25,11 +26,11 @@ module.exports = withErrorReporting(async (req, res) => {
   const { scan_id, user_id, outcome, actual_sale_price, days_to_sell } = req.body ?? {};
 
   // Validation
-  if (!scan_id || typeof scan_id !== 'string') {
-    return res.status(400).json({ error: 'scan_id is required' });
+  if (!scan_id || typeof scan_id !== 'string' || !UUID_RE.test(scan_id)) {
+    return res.status(400).json({ error: 'scan_id must be a valid UUID' });
   }
-  if (!user_id || typeof user_id !== 'string') {
-    return res.status(400).json({ error: 'user_id is required' });
+  if (!user_id || typeof user_id !== 'string' || !UUID_RE.test(user_id)) {
+    return res.status(400).json({ error: 'user_id must be a valid UUID' });
   }
   if (!outcome || !VALID_OUTCOMES.has(outcome)) {
     return res.status(400).json({ error: `outcome must be one of: ${[...VALID_OUTCOMES].join(', ')}` });
@@ -59,13 +60,18 @@ module.exports = withErrorReporting(async (req, res) => {
     // Find or create the scan_outcomes row for this scan
     const { data: existingRow, error: findError } = await supabase
       .from('scan_outcomes')
-      .select('id, our_valuation_mid')
+      .select('id, user_id, our_valuation_mid')
       .eq('scan_id', scan_id)
       .maybeSingle();
 
     if (findError) {
       console.error('[feedback/submit] find error:', findError.message);
       return res.status(500).json({ error: sanitiseError(findError) });
+    }
+
+    // #4: verify ownership even when a pending row already exists
+    if (existingRow && existingRow.user_id !== user_id) {
+      return res.status(403).json({ error: 'Scan not found or not owned by this user' });
     }
 
     // If no pending row exists (user responded without receiving a prompt),
