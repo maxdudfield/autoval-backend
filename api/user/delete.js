@@ -37,8 +37,8 @@ module.exports = withErrorReporting(async (req, res) => {
       .eq('user_id', user_id);
 
     if (garageError) {
-      console.error(`[user/delete] garage_cars delete error for ${user_id.slice(0, 8)}…:`, garageError.message);
-      // Non-fatal — continue
+      console.error(`[user/delete] step 1 failed — garage_cars delete for ${user_id.slice(0, 8)}…: ${garageError.message}`);
+      return res.status(500).json({ error: 'Account deletion failed. Please try again.' });
     }
 
     // 2. Anonymise scans — null all user-identifying fields, keep market data
@@ -52,8 +52,8 @@ module.exports = withErrorReporting(async (req, res) => {
       .eq('user_id', user_id);
 
     if (scansError) {
-      console.error(`[user/delete] scans anonymise error for ${user_id.slice(0, 8)}…:`, scansError.message);
-      // Non-fatal — continue
+      console.error(`[user/delete] step 2 failed — scans anonymise for ${user_id.slice(0, 8)}…: ${scansError.message}`);
+      return res.status(500).json({ error: 'Account deletion failed. Please try again.' });
     }
 
     // 3. Delete from users table
@@ -63,8 +63,8 @@ module.exports = withErrorReporting(async (req, res) => {
       .eq('id', user_id);
 
     if (userTableError) {
-      console.error(`[user/delete] users table delete error for ${user_id.slice(0, 8)}…:`, userTableError.message);
-      // Non-fatal — Supabase auth delete is the authoritative step
+      console.error(`[user/delete] step 3 failed — users table delete for ${user_id.slice(0, 8)}…: ${userTableError.message}`);
+      return res.status(500).json({ error: 'Account deletion failed. Please try again.' });
     }
 
     // 4. Delete from Supabase auth (requires service key)
